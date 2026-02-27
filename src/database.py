@@ -6,8 +6,10 @@ DATABASE_URL = 'sqlite:///./my.db'
 
 engine = create_engine(DATABASE_URL)
 
+
 class Base(DeclarativeBase):
     pass
+
 
 class Job(Base):
     __tablename__ = 'jobs'
@@ -19,8 +21,6 @@ class Job(Base):
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
 
-
-Base.metadata.create_all(bind=engine)
 
 SessionLocal = sessionmaker(
     autocommit=False, autoflush=False, bind=engine
