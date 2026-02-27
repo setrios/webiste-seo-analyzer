@@ -1,15 +1,25 @@
 from pydantic import BaseModel
+from enum import Enum
+
+
+class JobStatus(str, Enum):
+    CREATED = 'CREATED'
+    QUEUED = 'QUEUED'
+    PROCESSING = 'PROCESSING'
+    DONE = 'DONE'
+    ERROR = 'ERROR'
 
 
 class JobCreate(BaseModel):
     url: str
-    status: str
-    result: str
+
+class JobStatusUpdate(BaseModel):
+    status: JobStatus
 
 class JobResponse(BaseModel):
     id: int
     url: str
     status: str
-    result: str
+    result: str | None
     created_at: str
     updated_at: str
