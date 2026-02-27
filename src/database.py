@@ -1,5 +1,6 @@
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, relationship
 from sqlalchemy import create_engine, func
+from sqlalchemy import ForeignKey
 from datetime import datetime
 from enum import Enum
 
@@ -33,5 +34,16 @@ class Job(Base):
     result: Mapped[str | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
+    
+    user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
+
+    user: Mapped['User'] = relationship(back_populates='jobs')
 
 
+class User(Base):
+    __tablename__ = 'users'
+    
+    id: Mapped[int] = mapped_column(primary_key=True)
+    username: Mapped[str] 
+
+    jobs: Mapped[list['Job']] = relationship(back_populates='user')

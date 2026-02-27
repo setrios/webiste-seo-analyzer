@@ -23,3 +23,8 @@ class JobResponse(BaseModel):
     result: str | None
     created_at: str
     updated_at: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
