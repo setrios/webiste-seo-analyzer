@@ -1,11 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from schemas import JobResponse, JobCreate, JobStatusUpdate
 from datetime import datetime, timezone, timedelta
 import service
 import jwt
+import uuid
 
 # to get a string like this run:
 # openssl rand -hex 32
@@ -14,7 +15,7 @@ ALGORITHM = 'HS256'
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl='token')
+security = HTTPBearer()
 
 
 def create_access_token(data: dict, expires_delta: timedelta | None = None):
@@ -28,8 +29,9 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     return encoded_jwt
 
 
-def get_user_from_token(token: str = Depends(oauth2_scheme)):
+def get_user_from_token(credentials = Depends(security)):
     try:
+        token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = payload.get('sub')
         if user_id is None:
@@ -52,6 +54,10 @@ app = FastAPI()
 
 # create tables on startup
 Base.metadata.create_all(bind=engine)
+
+@app.get('/jobs-all')
+def get_all_jobs(db: Session = Depends(get_db)) -> list[JobResponse]:
+    return service.get_all_jobs(db)
 
 
 @app.get('/jobs')
@@ -106,7 +112,10 @@ def delete_job(job_id: int, user_id: int = Depends(get_user_from_token), db: Ses
 
 
 @app.post('/token')
-def login_for_access_token(user_id: int, db: Session = Depends(get_db)) -> dict:
+def get_access_token(db: Session = Depends(get_db)) -> dict:
+    # generate unique uid: convert UUID to int then cap to 31-bit range (0-2147483647)
+    user_id = int(uuid.uuid4().int % (2**31 - 1))
+    
     if not service.userExists(user_id, db):
         service.create_user(user_id, db)
 

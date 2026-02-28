@@ -22,7 +22,8 @@ def _job_to_response(job: Job) -> JobResponse:
         status=job.status,
         result=job.result,
         created_at=job.created_at.isoformat(),
-        updated_at=job.updated_at.isoformat()
+        updated_at=job.updated_at.isoformat(),
+        user_id=job.user_id
     )
 
 def _user_to_response(user: User) -> UserResponse:
@@ -47,8 +48,14 @@ def userExists(user_id: int, db: Session) -> bool:
     return False
 
 
+def get_all_jobs( db: Session) -> list[JobResponse]:
+    stmt = select(Job)
+    jobs = db.scalars(stmt).all()
+    return [_job_to_response(job) for job in jobs]
+
+
 def get_jobs(user_id: int, db: Session) -> list[JobResponse]:
-    stmt = select(Job).where(User.id == user_id)
+    stmt = select(Job).where(Job.user_id == user_id)
     jobs = db.scalars(stmt).all()
     return [_job_to_response(job) for job in jobs]
 
