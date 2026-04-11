@@ -27,6 +27,18 @@ def get_db():
         db.close()
 
 
+async def consume_events(queue: aio_pika.abc.AbstractQueue) -> None:
+    async with queue.iterator() as it:
+        async for message in it:
+            async with message.process():
+                event = json.loads(message.body)
+                db = SessionLocal()
+                try:
+                    service.update_job_from_event(event['job_id'], event, db)
+                finally:
+                    db.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # startup: connect to RabbitMQ
@@ -36,12 +48,18 @@ async def lifespan(app: FastAPI):
 
     # create queue (if not exists)
     await channel.declare_queue('seo.request', durable=True)
+    await channel.declare_queue('seo.events', durable=True)
     app.state.amqp_channel = channel
     app.state.amqp_connection = connection
+
+    # start background consumer for worker events
+    events_queue = await channel.get_queue('seo.events')
+    consumer_task = asyncio.create_task(consume_events(events_queue))
 
     yield  # app itself starts here
 
     # shutdown
+    consumer_task.cancel()
     await connection.close()
 
 
