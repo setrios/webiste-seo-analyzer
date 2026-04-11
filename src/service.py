@@ -37,7 +37,7 @@ def create_user(user_id: int, db: Session) -> UserResponse:
     db_user = User(id=user_id, username=f'user_{user_id}')
     db.add(db_user)
     db.commit()
-    db.refresh(db_user) 
+    db.refresh(db_user)
     return _user_to_response(db_user)
 
 
@@ -66,8 +66,21 @@ def get_job(user_id: int, job_id: int, db: Session) -> JobResponse | None:
     return _job_to_response(job) if job else None
 
 
+TERMINAL_STATUSES = ['DONE', 'ERROR']
+
 def create_job(user_id: int, job_data: JobCreate, db: Session) -> JobResponse:
-    db_job = Job(url=job_data.url, status=DBJobStatus.CREATED.value, user_id=user_id)
+    # idempotent: look for active job for current user+url
+    stmt = select(Job).where(
+        Job.user_id == user_id,
+        Job.url == job_data.url,
+        Job.status.notin_(TERMINAL_STATUSES)
+    )
+    existing_job = db.scalar(stmt)
+    if existing_job:
+        return _job_to_response(existing_job)
+
+    # create new job as QUEUED as will add to queue right after it
+    db_job = Job(url=job_data.url, status=DBJobStatus.QUEUED.value, user_id=user_id)
     db.add(db_job)
     db.commit()
     db.refresh(db_job)
@@ -77,19 +90,19 @@ def create_job(user_id: int, job_data: JobCreate, db: Session) -> JobResponse:
 def update_job_status(user_id: int, job_id: int, status_update: JobStatusUpdate, db: Session) -> JobResponse:
     stmt = select(Job).where(Job.user_id == user_id, Job.id == job_id)
     job = db.scalar(stmt)
-    
+
     if not job:
         return None
-    
+
     current_status = job.status
     new_status = status_update.status.value
-    
+
     if new_status not in VALID_TRANSITIONS.get(current_status, []):
         raise ValueError(
             f'Invalid transition: {current_status} -> {new_status}. '
             f'Valid transitions: {VALID_TRANSITIONS[current_status]}'
         )
-    
+
     job.status = new_status
 
     db.commit()

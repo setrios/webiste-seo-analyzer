@@ -4,15 +4,18 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from schemas import JobResponse, JobCreate, JobStatusUpdate
 from datetime import datetime, timezone, timedelta
+import json
 import service
 import jwt
 import uuid
 
-# to get a string like this run:
-# openssl rand -hex 32
-SECRET_KEY = 'e8864a5995f27034ffeb39d99f682c65ca1d93f355a8cb908b36e15dba122f99'
-ALGORITHM = 'HS256'
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+from contextlib import asynccontextmanager
+import aio_pika
+import os
+from dotenv import load_dotenv
+
+
+load_dotenv()
 
 
 def get_db():
@@ -23,7 +26,26 @@ def get_db():
         db.close()
 
 
-app = FastAPI()
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup: connect to RabbitMQ
+    rabbitmq_url = os.getenv('RABBITMQ_URL', 'amqp://guest:guest@localhost/')
+    connection = await aio_pika.connect_robust(rabbitmq_url)
+    channel = await connection.channel()
+
+    # create queue (if not exists)
+    await channel.declare_queue('seo.request', durable=True)
+    app.state.amqp_channel = channel
+    app.state.amqp_connection = connection
+
+    yield  # app itself starts here
+
+    # shutdown
+    await connection.close()
+
+
+app = FastAPI(lifespan=lifespan)
+
 
 # configure OpenAPI security scheme for Swagger UI
 def custom_openapi():
@@ -40,7 +62,7 @@ def custom_openapi():
             'scheme': 'bearer',
         }
     }
-    
+
     # mark protected routes as requiring Bearer token
     for path in openapi_schema['paths']:
         # skip /jobs-all and /token (public routes)
@@ -48,11 +70,13 @@ def custom_openapi():
             for method in openapi_schema['paths'][path]:
                 if method != 'parameters':
                     openapi_schema['paths'][path][method]['security'] = [{'Bearer': []}]
-    
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
+
 app.openapi = custom_openapi
+
 
 # create tables on startup
 Base.metadata.create_all(bind=engine)
@@ -65,7 +89,7 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None):
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=15)
     to_encode['exp'] = expire
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, os.getenv('SECRET_KEY'), algorithm=os.getenv('ALGORITHM'))
     return encoded_jwt
 
 
@@ -76,7 +100,7 @@ async def auth_middleware(request: Request, call_next):
     if auth_header and auth_header.startswith('Bearer '):
         try:
             token = auth_header.split(' ')[1]
-            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            payload = jwt.decode(token, os.getenv('SECRET_KEY'), algorithms=[os.getenv('ALGORITHM')])
             user_id = payload.get('sub')
             if user_id is not None:
                 request.state.user_id = int(user_id)
@@ -112,12 +136,27 @@ def get_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> Job
 
 
 @app.post('/jobs')
-def create_job(job_data: JobCreate, request: Request, db: Session = Depends(get_db)) -> JobResponse:
+async def create_job(job_data: JobCreate, request: Request, db: Session = Depends(get_db)) -> JobResponse:
     if request.state.user_id is None:
         raise HTTPException(status_code=401, detail='Invalid token')
     if not service.userExists(request.state.user_id, db):
         raise HTTPException(status_code=404, detail='User not found')
-    return service.create_job(request.state.user_id, job_data, db)
+
+    job = service.create_job(request.state.user_id, job_data, db)
+
+    # publish to rabbitmq only if job just become QUEUED
+    # (create only if not exist)
+    if job.status == 'QUEUED':
+        message_body = json.dumps({'job_id': job.id, 'url': job.url, 'user_id': job.user_id})
+        await request.app.state.amqp_channel.default_exchange.publish(
+            aio_pika.Message(
+                body=message_body.encode(),
+                delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+            ),
+            routing_key='seo.request'
+        )
+
+    return job
 
 
 @app.patch('/jobs/{job_id}')
@@ -126,12 +165,12 @@ def update_job_status(job_id: int, status_update: JobStatusUpdate, request: Requ
         raise HTTPException(status_code=401, detail='Invalid token')
     if not service.userExists(request.state.user_id, db):
         raise HTTPException(status_code=404, detail='User not found')
-    
+
     try:
         job = service.update_job_status(request.state.user_id, job_id, status_update, db)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     if not job:
         raise HTTPException(status_code=404, detail='Job not found')
     return job
@@ -143,7 +182,7 @@ def delete_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> 
         raise HTTPException(status_code=401, detail='Invalid token')
     if not service.userExists(request.state.user_id, db):
         raise HTTPException(status_code=404, detail='User not found')
-    
+
     job = service.delete_job(request.state.user_id, job_id, db)
 
     if not job:
@@ -155,7 +194,7 @@ def delete_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> 
 def get_access_token(db: Session = Depends(get_db)) -> dict:
     # generate unique uid: convert UUID to int then cap to 31-bit range (0-2147483647)
     user_id = int(uuid.uuid4().int % (2**31 - 1))
-    
+
     if not service.userExists(user_id, db):
         service.create_user(user_id, db)
 
