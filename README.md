@@ -25,7 +25,9 @@ Requirements:
 docker run -d --name rabbitmq -p 5672:5672 rabbitmq:3
 
 # venv
+python -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
 
 # terminal 1 - backend
 python main.py
