@@ -46,6 +46,7 @@ async def process_job(message: aio_pika.IncomingMessage, channel: aio_pika.Chann
         print(f'[worker] processing job {job_id}: {url}')
 
         # notify backend when starting
+        await publish_event(channel, {'type': 'processing', 'job_id': job_id})
         await publish_event(channel, {'type': 'progress', 'job_id': job_id, 'progress': 10})
 
         try:

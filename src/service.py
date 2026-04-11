@@ -132,6 +132,9 @@ def update_job_from_event(job_id: int, event: dict, db: Session) -> None:
     if event_type == 'progress':
         job.progress = event.get('progress', job.progress)
 
+    elif event_type == 'processing':
+        job.status = DBJobStatus.PROCESSING.value
+
     elif event_type == 'completed':
         job.status = DBJobStatus.DONE.value
         job.progress = 100
