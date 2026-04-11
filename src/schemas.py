@@ -21,6 +21,7 @@ class JobResponse(BaseModel):
     url: str
     status: str
     result: str | None
+    progress: int
     created_at: str
     updated_at: str
     user_id: int

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from schemas import JobResponse, JobCreate, JobStatusUpdate
 from datetime import datetime, timezone, timedelta
+import asyncio
 import json
 import service
 import jwt

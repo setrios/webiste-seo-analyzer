@@ -21,6 +21,7 @@ def _job_to_response(job: Job) -> JobResponse:
         url=job.url,
         status=job.status,
         result=job.result,
+        progress=job.progress,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
         user_id=job.user_id
@@ -117,3 +118,27 @@ def delete_job(user_id: int, job_id: int, db: Session) -> JobResponse | None:
         db.delete(job)
         db.commit()
         return _job_to_response(job)
+
+
+def update_job_from_event(job_id: int, event: dict, db: Session) -> None:
+    stmt = select(Job).where(Job.id == job_id)
+    job = db.scalar(stmt)
+
+    if not job:
+        return
+
+    event_type = event.get('type')
+
+    if event_type == 'progress':
+        job.progress = event.get('progress', job.progress)
+
+    elif event_type == 'completed':
+        job.status = DBJobStatus.DONE.value
+        job.progress = 100
+        job.result = event.get('result')
+
+    elif event_type == 'failed':
+        job.status = DBJobStatus.ERROR.value
+        job.result = event.get('error')
+
+    db.commit()

@@ -32,9 +32,10 @@ class Job(Base):
     url: Mapped[str]
     status: Mapped[str] = mapped_column(default=JobStatus.CREATED.value)
     result: Mapped[str | None] = mapped_column(nullable=True)
+    progress: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
-    
+
     user_id: Mapped[int] = mapped_column(ForeignKey('users.id'))
 
     user: Mapped['User'] = relationship(back_populates='jobs')
@@ -42,8 +43,8 @@ class Job(Base):
 
 class User(Base):
     __tablename__ = 'users'
-    
+
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] 
+    username: Mapped[str]
 
     jobs: Mapped[list['Job']] = relationship(back_populates='user')
