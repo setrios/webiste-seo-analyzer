@@ -1,4 +1,4 @@
-from schemas import JobResponse, JobCreate, JobStatus, JobStatusUpdate, UserResponse
+from schemas import JobResponse, JobCreate, JobStatusUpdate, UserResponse
 from database import Job, JobStatus as DBJobStatus
 from database import User
 from sqlalchemy import select
