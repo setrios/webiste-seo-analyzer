@@ -3,12 +3,40 @@ import json
 import os
 import requests
 
+import boto3
+from botocore.client import Config
 from bs4 import BeautifulSoup
 import aio_pika
 from dotenv import load_dotenv
 
 
 load_dotenv()
+
+
+def get_s3_client():
+    return boto3.client(
+        's3',
+        endpoint_url=os.getenv('MINIO_ENDPOINT'),
+        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+        config=Config(signature_version='s3v4'),
+    )
+
+
+def ensure_bucket(s3_client, bucket: str) -> None:
+    try:
+        s3_client.head_bucket(Bucket=bucket)
+    except Exception:
+        s3_client.create_bucket(Bucket=bucket)
+
+
+def upload_result(s3_client, bucket: str, key: str, data: dict) -> None:
+    s3_client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=json.dumps(data).encode(),
+        ContentType='application/json',
+    )
 
 
 def analyze_url(url: str) -> dict:
@@ -53,14 +81,22 @@ async def process_job(message: aio_pika.IncomingMessage, channel: aio_pika.Chann
             # analyze_url is blocking, so run in thread to avoid blocking event loop
             result = await asyncio.to_thread(analyze_url, url)
 
-            await publish_event(channel, {'type': 'progress', 'job_id': job_id, 'progress': 90})
+            await publish_event(channel, {'type': 'progress', 'job_id': job_id, 'progress': 80})
+
+            # upload to MinIO
+            bucket = os.getenv('MINIO_BUCKET', 'seo-results')
+            s3_key = f'jobs/{job_id}/result.json'
+            s3_client = get_s3_client()
+            await asyncio.to_thread(ensure_bucket, s3_client, bucket)
+            await asyncio.to_thread(upload_result, s3_client, bucket, s3_key, result)
+
             await publish_event(channel, {
                 'type': 'completed',
                 'job_id': job_id,
-                'result': json.dumps(result),
+                's3_key': s3_key,
             })
 
-            print(f'[worker] job {job_id} completed')
+            print(f'[worker] job {job_id} completed, s3_key={s3_key}')
 
         except Exception as e:
             await publish_event(channel, {

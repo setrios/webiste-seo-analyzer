@@ -31,7 +31,7 @@ class Job(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     url: Mapped[str]
     status: Mapped[str] = mapped_column(default=JobStatus.CREATED.value)
-    result: Mapped[str | None] = mapped_column(nullable=True)
+    s3_key: Mapped[str | None] = mapped_column(nullable=True)
     progress: Mapped[int] = mapped_column(default=0)
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())

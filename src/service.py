@@ -20,7 +20,7 @@ def _job_to_response(job: Job) -> JobResponse:
         id=job.id,
         url=job.url,
         status=job.status,
-        result=job.result,
+        s3_key=job.s3_key,
         progress=job.progress,
         created_at=job.created_at.isoformat(),
         updated_at=job.updated_at.isoformat(),
@@ -138,10 +138,9 @@ def update_job_from_event(job_id: int, event: dict, db: Session) -> None:
     elif event_type == 'completed':
         job.status = DBJobStatus.DONE.value
         job.progress = 100
-        job.result = event.get('result')
+        job.s3_key = event.get('s3_key')
 
     elif event_type == 'failed':
         job.status = DBJobStatus.ERROR.value
-        job.result = event.get('error')
 
     db.commit()

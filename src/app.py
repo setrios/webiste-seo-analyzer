@@ -15,6 +15,9 @@ import aio_pika
 import os
 from dotenv import load_dotenv
 
+import boto3
+from botocore.client import Config
+
 
 load_dotenv()
 
@@ -152,6 +155,35 @@ def get_job(job_id: int, request: Request, db: Session = Depends(get_db)) -> Job
     if not job:
         raise HTTPException(status_code=404, detail='Job not found')
     return job
+
+
+@app.get('/jobs/{job_id}/result')
+def get_job_result(job_id: int, request: Request, db: Session = Depends(get_db)) -> dict:
+    if request.state.user_id is None:
+        raise HTTPException(status_code=401, detail='Invalid token')
+    if not service.userExists(request.state.user_id, db):
+        raise HTTPException(status_code=404, detail='Uset not found')
+
+    job = service.get_job(request.state.user_id, job_id, db)
+
+    if not job:
+        raise HTTPException(status_code=404, detail='Job not found')
+    if not job.s3_key:
+        raise HTTPException(status_code=404, detail='Result not avaliable yet')
+
+    s3 = boto3.client(
+        's3',
+        endpoint_url=os.getenv('MINIO_ENDPOINT'),
+        aws_access_key_id=os.getenv('MINIO_ACCESS_KEY'),
+        aws_secret_access_key=os.getenv('MINIO_SECRET_KEY'),
+        config=Config(signature_version='s3v4'),
+    )
+    presigned_url = s3.generate_presigned_url(
+        'get_object',
+        Params={'Bucket': os.getenv('MINIO_BUCKET'), 'Key': job.s3_key},
+        ExpiresIn=3600,
+    )
+    return {'presigned_url': presigned_url}
 
 
 @app.post('/jobs')

@@ -20,7 +20,7 @@ class JobResponse(BaseModel):
     id: int
     url: str
     status: str
-    result: str | None
+    s3_key: str | None
     progress: int
     created_at: str
     updated_at: str

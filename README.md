@@ -17,12 +17,15 @@ Backend service for SEO analysis of URLs.
 
 Requirements:
 
-- Docker (for RabbitMQ)
+- Docker (for RabbitMQ, MinIO)
 - Python venv with dependencies
 
 ```bash
 # RabbitMQ
 docker run -d --name rabbitmq -p 5672:5672 rabbitmq:3
+
+# MinIO
+docker run -d --name minio -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address :9001
 
 # venv
 python -m venv .venv
@@ -33,6 +36,7 @@ pip install -r requirements.txt
 python main.py
 
 # terminal 2 - worker
+source .venv/bin/activate
 python worker.py
 ```
 
