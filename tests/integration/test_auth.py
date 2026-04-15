@@ -24,29 +24,27 @@ class TestAuthMiddleware:
         assert response.status_code == 401
 
     def test_expired_token_returns_401(self, client):
-        # Assemble
         payload = {'sub': '1', 'exp': datetime.now(timezone.utc) - timedelta(seconds=1)}
         token = make_token(payload)
-        # Act
+
         response = client.get('/jobs', headers={'Authorization': f'Bearer {token}'})
-        # Assert
+
         assert response.status_code == 401
 
     def test_token_wrong_secret_returns_401(self, client):
-        # Assemble
         payload = {'sub': '1', 'exp': datetime.now(timezone.utc) + timedelta(hours=1)}
         token = make_token(payload, secret='wrong-secret')
-        # Act
+
         response = client.get('/jobs', headers={'Authorization': f'Bearer {token}'})
-        # Assert
+
         assert response.status_code == 401
 
     def test_valid_token_grants_access(self, client, auth_headers):
-        # Act
         response = client.get('/jobs', headers=auth_headers)
-        # Assert
         assert response.status_code == 200
 
     def test_public_route_requires_no_token(self, client):
         response = client.get('/jobs-all')
         assert response.status_code == 200
+
+

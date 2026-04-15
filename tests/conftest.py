@@ -22,12 +22,14 @@ def test_engine():
         connect_args={'check_same_thread': False},
         poolclass=StaticPool
     )
-    
+
     Base.metadata.create_all(bind=engine)
-    
+
     yield engine
-    
+
     Base.metadata.drop_all(bind=engine)
+
+    engine.dispose()
 
 
 @pytest.fixture()
@@ -41,7 +43,7 @@ def db_session(test_engine):
 @pytest.fixture()
 def client(test_engine):
     TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
-    
+
     def override_get_db():
         session = TestingSessionLocal()
         try:
