@@ -7,6 +7,8 @@ import os
 # Lab 3
 # Lab 4
 # Lab 5
+# Lab 6
+# Lab 7
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
