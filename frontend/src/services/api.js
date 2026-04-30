@@ -90,6 +90,18 @@ export const getJobResult = async (jobId) => {
   }
 };
 
+// fetch and parse result JSON data
+export const getJobResultData = async (jobId) => {
+  try {
+    const presignedUrl = await getJobResult(jobId);
+    const response = await axios.get(presignedUrl);
+    return response.data;
+  } catch (error) {
+    console.error('Failed to fetch result data:', error);
+    throw error;
+  }
+};
+
 // initialize token on app load
 export const initializeAuth = async () => {
   const token = localStorage.getItem('token');
