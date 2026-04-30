@@ -1,7 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy.orm import Session
-from database import SessionLocal, engine, Base
+from database import SessionLocal, engine, Base, Job
 from schemas import JobResponse, JobCreate, JobStatusUpdate
 from datetime import datetime, timezone, timedelta
 import asyncio
@@ -22,6 +22,41 @@ from botocore.client import Config
 load_dotenv()
 
 
+# websocket connection manager
+class ConnectionManager:
+    def __init__(self):
+        # store active connections per user: {user_id: [websocket1, websocket2, ...]}
+        self.active_connections: dict[int, list[WebSocket]] = {}
+
+    async def connect(self, user_id: int, websocket: WebSocket):
+        await websocket.accept()
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        self.active_connections[user_id].append(websocket)
+
+    def disconnect(self, user_id: int, websocket: WebSocket):
+        if user_id in self.active_connections:
+            self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+
+    async def broadcast_to_user(self, user_id: int, message: dict):
+        if user_id not in self.active_connections:
+            return
+        
+        # send to all user's connections, remove dead ones
+        dead_connections = []
+        for websocket in self.active_connections[user_id]:
+            try:
+                await websocket.send_json(message)
+            except Exception:
+                dead_connections.append(websocket)
+        
+        # cleanup dead connections
+        for websocket in dead_connections:
+            self.disconnect(user_id, websocket)
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -30,7 +65,21 @@ def get_db():
         db.close()
 
 
-async def consume_events(queue: aio_pika.abc.AbstractQueue) -> None:
+async def send_current_job_states(websocket: WebSocket, user_id: int, db: Session):
+    # send current state of all active (non-terminal) jobs
+    jobs = service.get_jobs(user_id, db)
+    for job in jobs:
+        if job.status not in ['DONE', 'ERROR']:
+            await websocket.send_json({
+                'type': 'status',
+                'job_id': job.id,
+                'status': job.status,
+                'progress': job.progress,
+                's3_key': job.s3_key
+            })
+
+
+async def consume_events(queue: aio_pika.abc.AbstractQueue, ws_manager: ConnectionManager) -> None:
     async with queue.iterator() as it:
         async for message in it:
             async with message.process():
@@ -38,6 +87,11 @@ async def consume_events(queue: aio_pika.abc.AbstractQueue) -> None:
                 db = SessionLocal()
                 try:
                     service.update_job_from_event(event['job_id'], event, db)
+                    
+                    # get job's user_id to broadcast event
+                    job = db.query(Job).filter(Job.id == event['job_id']).first()
+                    if job:
+                        await ws_manager.broadcast_to_user(job.user_id, event)
                 finally:
                     db.close()
 
@@ -55,9 +109,13 @@ async def lifespan(app: FastAPI):
     app.state.amqp_channel = channel
     app.state.amqp_connection = connection
 
+    # initialize websocket connection manager
+    ws_manager = ConnectionManager()
+    app.state.ws_manager = ws_manager
+
     # start background consumer for worker events
     events_queue = await channel.get_queue('seo.events')
-    consumer_task = asyncio.create_task(consume_events(events_queue))
+    consumer_task = asyncio.create_task(consume_events(events_queue, ws_manager))
 
     yield  # app itself starts here
 
@@ -251,4 +309,50 @@ def get_access_token(db: Session = Depends(get_db)) -> dict:
 
     access_token = create_access_token(data={'sub': str(user_id)})
     return {'access_token': access_token, 'token_type': 'bearer'}
+
+
+@app.websocket('/ws/jobs')
+async def websocket_jobs(websocket: WebSocket, token: str):
+    # validate JWT token from query parameter
+    try:
+        payload = jwt.decode(token, os.getenv('SECRET_KEY'), algorithms=[os.getenv('ALGORITHM')])
+        user_id = payload.get('sub')
+        if user_id is None:
+            await websocket.close(code=1008, reason='Invalid token')
+            return
+        user_id = int(user_id)
+    except jwt.PyJWTError:
+        await websocket.close(code=1008, reason='Invalid token')
+        return
+
+    # check if user exists
+    db = SessionLocal()
+    try:
+        if not service.userExists(user_id, db):
+            await websocket.close(code=1008, reason='User not found')
+            return
+    finally:
+        db.close()
+
+    # accept connection and add to manager
+    ws_manager: ConnectionManager = websocket.app.state.ws_manager
+    await ws_manager.connect(user_id, websocket)
+
+    try:
+        # send current state of active jobs
+        db = SessionLocal()
+        try:
+            await send_current_job_states(websocket, user_id, db)
+        finally:
+            db.close()
+
+        # keep connection alive, listen for disconnect
+        while True:
+            try:
+                # wait for any message from client (or disconnect)
+                await websocket.receive_text()
+            except WebSocketDisconnect:
+                break
+    finally:
+        ws_manager.disconnect(user_id, websocket)
 

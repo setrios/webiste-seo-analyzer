@@ -70,12 +70,13 @@ def get_job(user_id: int, job_id: int, db: Session) -> JobResponse | None:
 TERMINAL_STATUSES = ['DONE', 'ERROR']
 
 def create_job(user_id: int, job_data: JobCreate, db: Session) -> JobResponse:
-    # idempotent: look for active job for current user+url
+    # idempotent look for active job for current user+url
     stmt = select(Job).where(
         Job.user_id == user_id,
         Job.url == job_data.url,
         Job.status.notin_(TERMINAL_STATUSES)
     )
+
     existing_job = db.scalar(stmt)
     if existing_job:
         return _job_to_response(existing_job)
